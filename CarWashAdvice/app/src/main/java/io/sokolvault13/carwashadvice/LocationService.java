@@ -1,24 +1,40 @@
 package io.sokolvault13.carwashadvice;
 
-import android.app.Activity;
-import android.app.Application;
-import android.app.Application.ActivityLifecycleCallbacks;
-import android.content.Context;
 import android.location.Location;
-import android.support.v7.app.AppCompatActivity;
-import android.util.Log;
 
 import com.google.android.gms.location.FusedLocationProviderClient;
 import com.google.android.gms.location.LocationServices;
 import com.google.android.gms.tasks.OnSuccessListener;
 
-public class LocationService {
+public class LocationService implements Runnable {
 
     private double latitude;
     private double longitude;
+    private Location mLocation;
     private FusedLocationProviderClient mLocationProviderClient;
+    private MainActivity mainActivity;
+    private MessageThread message;
 
-    private LocationService(){
+
+    public void setLocationProviderClient(FusedLocationProviderClient locationProviderClient) {
+        mLocationProviderClient = locationProviderClient;
+    }
+
+    public void setMainActivity(MainActivity mainActivity) {
+        this.mainActivity = mainActivity;
+    }
+
+    private LocationService() {
+        latitude = 1d;
+        longitude = 2d;
+    }
+
+    public MessageThread getMessage() {
+        return message;
+    }
+
+    public void setMessage(MessageThread message) {
+        this.message = message;
     }
 
     private void setLatitude(double latitude) {
@@ -33,44 +49,50 @@ public class LocationService {
         return latitude;
     }
 
+    public String getStringLatitude() {
+        return "" + latitude;
+    }
+
     public double getLongitude() {
         return longitude;
     }
 
-    public static LocationService newInstance(){
+    public static LocationService newInstance() {
         return new LocationService();
     }
 
-    public static FusedLocationProviderClient getLocationProvider (Activity activity){
+    public static FusedLocationProviderClient getLocationProvider(MainActivity activity) {
         return LocationServices.getFusedLocationProviderClient(activity);
     }
 
     @Override
     public String toString() {
         return "{" +
-                "latitude=" + latitude +
-                ", longitude=" + longitude +
+                "latitude=" + this.latitude +
+                ", longitude=" + this.longitude +
                 '}';
     }
 
+    public synchronized LocationService getLastLocation(final FusedLocationProviderClient locationProviderClient,
+                                                        final MainActivity mainActivity, final MessageThread message) throws SecurityException {
 
-    public LocationService getLastLocation(FusedLocationProviderClient mLocationProviderClient,
-                                           MainActivity mainActivity) throws SecurityException {
-        mLocationProviderClient.getLastLocation()
-                .addOnSuccessListener(mainActivity, new OnSuccessListener<Location>() {
-                    @Override
-                    public void onSuccess(Location location) {
+        locationProviderClient.getLastLocation()
+                .addOnSuccessListener(mainActivity, location -> {
+                    if (location != null) {
+                        setLatitude(location.getLatitude());
+                        setLongitude(location.getLongitude());
 
-                        if (location != null) {
-                            setLatitude(location.getLatitude());
-                            setLongitude(location.getLongitude());
-//                            textView.setText(locationService.toString());
-//                            Log.i(TAG, "test");
+                        synchronized (message) {
+                            message.notify();
                         }
                     }
-
                 });
+        return LocationService.this;
+    }
 
-        return this;
+    @Override
+    public void run() {
+        LocationService locationService = LocationService.this;
+        locationService.getLastLocation(mLocationProviderClient, mainActivity, message);
     }
 }

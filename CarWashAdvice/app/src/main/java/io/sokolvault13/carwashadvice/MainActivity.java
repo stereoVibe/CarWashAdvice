@@ -2,12 +2,17 @@ package io.sokolvault13.carwashadvice;
 
 import android.Manifest;
 import android.content.pm.PackageManager;
+import android.location.Location;
 import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
+import android.support.v7.app.ActionBar;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
+import android.util.Log;
+import android.view.View;
 import android.widget.Button;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 import com.google.android.gms.location.FusedLocationProviderClient;
@@ -16,9 +21,14 @@ public class MainActivity extends AppCompatActivity {
 
     final static int PERMISSION_REQUEST_CODE = 6996;
     final LocationService locationService = LocationService.newInstance();
+//    final LocationService locationService = null;
+    private Location mLocation;
     public final MessageThread message = new MessageThread("Обработать");
 
-    /* Callback from requestPermission() */
+    /* Callback from requestPermission() and appropriate actions depends on
+     * granted permissions */
+
+
     @Override
     public synchronized void onRequestPermissionsResult(int requestCode,
                                                         @NonNull String[] permissions,
@@ -32,10 +42,22 @@ public class MainActivity extends AppCompatActivity {
 
                     final FusedLocationProviderClient mLocationProviderClient;
                     mLocationProviderClient = LocationService.getLocationProvider(this);
+
                     locationService.setLocationProviderClient(mLocationProviderClient);
                     locationService.setMainActivity(this);
-                    locationService.setMessage(message);
-                    locationService.run();
+                    LocationService.setInstance(locationService);
+
+//                    locationService.setMessage(message);
+
+                    if (locationService.getUpdateLocation() != null) {
+                        LocationService.deleteAsyncUpdateLocation();
+                    }
+                    try {
+                        locationService.run(message);
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+
                 } else {
                     // permission denied, boo! Disable the
                     // functionality that depends on this permission.
@@ -52,13 +74,103 @@ public class MainActivity extends AppCompatActivity {
                 PERMISSION_REQUEST_CODE);
     }
 
+    protected synchronized void requestCoordinates(AppCompatActivity activity, boolean forceReload){
+
+        TextView textView1 = activity.findViewById(R.id.hello_text);
+        ProgressBar progressBar1 = activity.findViewById(R.id.progressBar2);
+
+        if (locationService.getCoordinates() != null){
+            if (!forceReload) {
+                progressBar1.setVisibility(View.GONE);
+                textView1.setVisibility(View.VISIBLE);
+//                textView.setText("Без потоков: "+ "\n" + locationService.getLocation().getLatitude());
+                textView1.setText(String.format("Без потоков:\n %s", locationService.getCoordinates()));
+            }else {
+                textView1.setVisibility(View.GONE);
+                progressBar1.setVisibility(View.VISIBLE);
+                requestPermission();
+                new Thread(() -> {
+                    synchronized (message) {
+                        try {
+                            message.wait();
+                        } catch (InterruptedException e) {
+                            e.printStackTrace();
+                        }
+                        runOnUiThread(()->{
+                            progressBar1.setVisibility(View.GONE);
+                            textView1.setVisibility(View.VISIBLE);
+//                    progressBar.setVisibility(View.GONE);
+                            Log.d("Поток 1: ", "Вышли из 1-го потока");
+//                        textView.post(() -> textView.setText("После всех потоков: " + "\n" + locationService.getLocation().getLatitude()));
+                            textView1.post(() -> textView1.setText(String.format("После всех потоков:\n %s", locationService.getCoordinates())));
+                        });
+                        LocationService.getInstance().setLocation(locationService.getLocation());
+
+                    }
+                }).start();
+            }
+        } else {
+            textView1.setVisibility(View.GONE);
+            progressBar1.setVisibility(View.VISIBLE);
+            requestPermission();
+            new Thread(() -> {
+                synchronized (message) {
+                    try {
+                        message.wait();
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                    runOnUiThread(()->{
+                        progressBar1.setVisibility(View.GONE);
+                        textView1.setVisibility(View.VISIBLE);
+//                    progressBar.setVisibility(View.GONE);
+                        Log.d("Поток 1: ", "Вышли из 1-го потока");
+//                        textView.post(() -> textView.setText("После всех потоков: " + "\n" + locationService.getLocation().getLatitude()));
+                        textView1.post(() -> textView1.setText(String.format("После всех потоков:\n %s", locationService.getCoordinates())));
+                    });
+                    LocationService.getInstance().setLocation(locationService.getLocation());
+
+                }
+            }).start();
+        }
+    }
+
+    @Override
+    public Object onRetainCustomNonConfigurationInstance() {
+        if (locationService.getCoordinates() != null) {
+            return locationService;
+        }
+        return null;
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        super.onSaveInstanceState(outState);
+        outState.putString("COORDINATES", locationService.getCoordinates());
+        outState.putDouble("Latitude", locationService.getLatitude());
+        outState.putDouble("Longitude", locationService.getLongitude());
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        if (mLocation != null) {
+            Log.d("После создания", String.format("Значение координат: %s", mLocation.getLatitude()));
+        }
+
         setContentView(R.layout.activity_main);
+        AppCompatActivity activity = this;
+
+        if (getLastCustomNonConfigurationInstance() != null){
+            LocationService restoredLocationService = (LocationService) getLastCustomNonConfigurationInstance();
+            locationService.setCoordinates(restoredLocationService.getCoordinates());
+        }
 
         final Button button = findViewById(R.id.button2);
+//        button.setVisibility(View.INVISIBLE);
         final TextView textView = findViewById(R.id.hello_text);
+        final ProgressBar progressBar = findViewById(R.id.progressBar2);
+        progressBar.setVisibility(View.GONE);
 
         if (ContextCompat.checkSelfPermission(this,
                 Manifest.permission.ACCESS_FINE_LOCATION)
@@ -78,6 +190,7 @@ public class MainActivity extends AppCompatActivity {
                         Manifest.permission.ACCESS_FINE_LOCATION);
             } else {
                 // No explanation needed, we can request the permission.
+//                requestPermission();
                 new Thread(() -> {
                     synchronized (message){
                         try {
@@ -90,19 +203,14 @@ public class MainActivity extends AppCompatActivity {
                 }).start();
             }
         }
+        requestCoordinates(activity, false);
 
-        button.setOnClickListener((view) ->
-                new Thread(() -> {
-                    synchronized (message){
-                        try {
-                            requestPermission();
-                            message.wait();
-                        } catch (InterruptedException e) {
-                            e.printStackTrace();
-                        }
-                        textView.post(()-> textView.setText("Из Runnable 2: "+ "\n" + locationService.toString()));
-                    }
-                }).start()
-        );
+        button.setOnClickListener((v -> requestCoordinates(activity, true)));
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        LocationService.deleteAsyncUpdateLocation();
     }
 }
